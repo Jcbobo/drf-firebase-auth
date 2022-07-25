@@ -1,7 +1,6 @@
 """ helper functions """
 from typing import Any
 import uuid
-
 from firebase_admin import auth
 
 

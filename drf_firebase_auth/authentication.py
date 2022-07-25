@@ -7,8 +7,8 @@ from typing import Tuple, Dict
 import logging
 
 import firebase_admin
+from django.utils.module_loading import import_string
 from firebase_admin import auth as firebase_auth
-from django.utils.encoding import smart_text
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
@@ -17,7 +17,8 @@ from rest_framework import (
     exceptions
 )
 
-from .settings import api_settings
+from django.conf import settings
+
 from .models import (
     FirebaseUser,
     FirebaseUserProvider
@@ -29,22 +30,24 @@ log = logging.getLogger(__title__)
 User = get_user_model()
 
 firebase_credentials = firebase_admin.credentials.Certificate(
-    api_settings.FIREBASE_SERVICE_ACCOUNT_KEY
+    settings.FIREBASE_SERVICE_ACCOUNT_KEY
 )
 firebase = firebase_admin.initialize_app(
     credential=firebase_credentials,
 )
+
+FIREBASE_USERNAME_MAPPING_FUNC = import_string(settings.FIREBASE_USERNAME_MAPPING_FUNC)
 
 
 class FirebaseAuthentication(authentication.TokenAuthentication):
     """
     Token based authentication using firebase.
     """
-    keyword = api_settings.FIREBASE_AUTH_HEADER_PREFIX
+    keyword = settings.FIREBASE_AUTH_HEADER_PREFIX
 
     def authenticate_credentials(
-        self,
-        token: str
+            self,
+            token: str
     ) -> Tuple[AnonymousUser, Dict]:
         try:
             decoded_token = self._decode_token(token)
@@ -63,7 +66,7 @@ class FirebaseAuthentication(authentication.TokenAuthentication):
         try:
             decoded_token = firebase_auth.verify_id_token(
                 token,
-                check_revoked=api_settings.FIREBASE_CHECK_JWT_REVOKED
+                check_revoked=settings.FIREBASE_CHECK_JWT_REVOKED
             )
             log.info(f'_decode_token - decoded_token: {decoded_token}')
             return decoded_token
@@ -72,8 +75,8 @@ class FirebaseAuthentication(authentication.TokenAuthentication):
             raise Exception(e)
 
     def _authenticate_token(
-        self,
-        decoded_token: Dict
+            self,
+            decoded_token: Dict
     ) -> firebase_auth.UserRecord:
         """ Returns firebase user if token is authenticated """
         try:
@@ -81,7 +84,7 @@ class FirebaseAuthentication(authentication.TokenAuthentication):
             log.info(f'_authenticate_token - uid: {uid}')
             firebase_user = firebase_auth.get_user(uid)
             log.info(f'_authenticate_token - firebase_user: {firebase_user}')
-            if api_settings.FIREBASE_AUTH_EMAIL_VERIFICATION:
+            if settings.FIREBASE_AUTH_EMAIL_VERIFICATION:
                 if not firebase_user.email_verified:
                     raise Exception(
                         'Email address of this user has not been verified.'
@@ -92,8 +95,8 @@ class FirebaseAuthentication(authentication.TokenAuthentication):
             raise Exception(e)
 
     def _get_or_create_local_user(
-        self,
-        firebase_user: firebase_auth.UserRecord
+            self,
+            firebase_user: firebase_auth.UserRecord
     ) -> User:
         """
         Attempts to return or create a local User from Firebase user data
@@ -116,10 +119,10 @@ class FirebaseAuthentication(authentication.TokenAuthentication):
             log.error(
                 f'_get_or_create_local_user - User.DoesNotExist: {email}'
             )
-            if not api_settings.FIREBASE_CREATE_LOCAL_USER:
+            if not settings.FIREBASE_CREATE_LOCAL_USER:
                 raise Exception('User is not registered to the application.')
             username = \
-                api_settings.FIREBASE_USERNAME_MAPPING_FUNC(firebase_user)
+                FIREBASE_USERNAME_MAPPING_FUNC(firebase_user)
             log.info(
                 f'_get_or_create_local_user - username: {username}'
             )
@@ -130,8 +133,8 @@ class FirebaseAuthentication(authentication.TokenAuthentication):
                 )
                 user.last_login = timezone.now()
                 if (
-                    api_settings.FIREBASE_ATTEMPT_CREATE_WITH_DISPLAY_NAME
-                    and firebase_user.display_name is not None
+                        settings.FIREBASE_ATTEMPT_CREATE_WITH_DISPLAY_NAME
+                        and firebase_user.display_name is not None
                 ):
                     display_name = firebase_user.display_name.split(' ')
                     if len(display_name) == 2:
@@ -143,9 +146,9 @@ class FirebaseAuthentication(authentication.TokenAuthentication):
         return user
 
     def _create_local_firebase_user(
-        self,
-        user: User,
-        firebase_user: firebase_auth.UserRecord
+            self,
+            user: User,
+            firebase_user: firebase_auth.UserRecord
     ):
         """ Create a local FireBase model if one does not already exist """
         # pylint: disable=no-member
